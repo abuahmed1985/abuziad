@@ -151,10 +151,22 @@ function seedIfEmpty() {
 seedIfEmpty();
 
 // ---- staff accounts: passwords ONLY from env vars, else random + log once ----
+// The env var is the source of truth: on EVERY boot, if the env var is set
+// the stored password is synced to it. (An earlier version only set the
+// password when the account was first created, so an ADMIN_PASSWORD added
+// AFTER the first deploy never took effect — the admin account kept the
+// random first-boot password and could never log in, while trainer worked.)
 function ensureStaff(username, name, role, envKey) {
+  const envPw = process.env[envKey];
   const existing = db.prepare('SELECT id FROM users WHERE username=?').get(username);
-  if (existing) return;
-  let pw = process.env[envKey];
+  if (existing) {
+    if (envPw) {
+      db.prepare('UPDATE users SET passwordHash=? WHERE id=?').run(bcrypt.hashSync(envPw, 10), existing.id);
+      console.log(`[staff] ${role} account "${username}" password synced from ${envKey}`);
+    }
+    return;
+  }
+  let pw = envPw;
   if (!pw) { pw = crypto.randomBytes(9).toString('base64url'); console.log(`[FIRST BOOT] ${role} account "${username}" password (save it, then set ${envKey} on Render): ${pw}`); }
   db.prepare('INSERT INTO users(username,name,passwordHash,role,level,createdAt) VALUES (?,?,?,?,?,?)')
     .run(username, name, bcrypt.hashSync(pw, 10), role, null, new Date().toISOString());
